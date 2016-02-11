@@ -1,0 +1,29 @@
+tile:
+    tile.occupier = enemy # or tower or None
+    tile.repr = tile.occupier.repr # " " if None
+
+enemy:
+    enemy.repr = "@"
+tower:
+    tower.radar = [list of tiles]
+    tower.repr = "#"
+    tower.target = enemy # or None
+    possible = list()
+    for r in tower.radar:
+        if r.occupier is type(Enemy):
+            possible.append((r, distance_from_us))
+    
+
+
+
+
+
+tiles are two chars wide, one high
+punctuation are towers, alpha are enemies
+enemies go from left edge of screen to right
+when they get to the right, you lose one life
+when your lives go to zero, you lose
+different waves
+different enemy types.  each with different speeds
+    1,2,3,4,5 = how many ticks
+
