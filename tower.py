@@ -33,6 +33,7 @@ class Grid:
         self.path = self.a_star_search(start, goal)
         self.round_num = 0
         self.game_over = False
+        self.money = 2000
         self.vis.draw(self)
         self.main_while()
 
@@ -54,19 +55,34 @@ class Grid:
     def player_place(self):
         user_cmd_gen = self.vis.getch(self)
         user_cmd = True
+        money_available = self.money
         while True:
+            self.vis.status_line("Money available: {}".format(str(money_available)))
             user_cmd, arg1, arg2 = next(user_cmd_gen)
             if user_cmd == False: break
             if user_cmd == "BUY":
                 old_towers = self.towers.copy()
-                self.add_tower(arg1, arg2)
+                new_tower = arg1()
+                self.add_tower(new_tower, arg2)
                 temp_path = self.a_star_search(self.start, self.goal)
                 if not temp_path: # goal is blocked
                     self.towers = old_towers
                 else:
                     self.path = temp_path
-
-
+                    money_available -= new_tower.cost
+            elif user_cmd == "SELL":
+                try:
+                    tower = self.towers[arg1]
+                    refund = tower.cost
+                    if tower.round_placed != self.round_num:
+                        refund /= 2
+                    self.del_tower(arg1)
+                    self.path = self.a_star_search(self.start, self.goal)
+                    money_available += int(refund)
+                except: pass
+        self.money = money_available
+    def del_tower(self, point):
+        del self.towers[point]
     def play_round(self, enemy_type, amount):
         self.num_enemies = amount
         initial_amount = amount
@@ -165,9 +181,10 @@ class Grid:
     def passable(self, point):
         return point not in self.towers.keys()
     def add_tower(self, tower, point):
-        tower = tower()
+#        tower = tower()
         self.towers[point] = tower
         tower.rrange = self.find_range(point, tower.radius)
+        tower.round_placed = self.round_num
     def add_enemy(self, enemy_type):
         enemy_dict = {"superboss": _SuperBoss, "basic": _Basic, "boss": _Boss}
         enemy = enemy_dict[enemy_type]()
@@ -248,6 +265,7 @@ class _Pellet(_Tower):
         self.i = self.speed
         self.strength = 5
         self.string = "%"
+        self.cost = 100
         pass
 class _Aqua(_Tower):
     def __init__(self):
@@ -257,6 +275,7 @@ class _Aqua(_Tower):
         self.i = self.speed
         self.strength = 10
         self.string = "@"
+        self.cost = 200
         pass
 
 class Visual_scr:
@@ -321,14 +340,24 @@ class Visual_scr:
         self.show_cursor = True
         dir_dict = {"w": (-1, 0), "a": (0,-2), "s": (1,0), "d": (0,2)}
         tower_dict = {1: _Pellet, 2: _Aqua}
+        addtrue_delfalse = True
+        tower_type = _Pellet
         while True:
             key = self.screen.getkey()
             if key in dir_dict.keys():
                 self.cursor_move(dir_dict[key])
                 self.draw(grid)
             elif key == "\n":
-                tower_type = _Pellet
-                yield "BUY", tower_type, (self.cursor[0], self.cursor[1]//2)
+                if addtrue_delfalse:
+                    yield "BUY", tower_type, (self.cursor[0], self.cursor[1]//2)
+                else:
+                    yield "SELL", (self.cursor[0], self.cursor[1]//2), None
+            elif key == "/":
+                addtrue_delfalse = not addtrue_delfalse
+            elif key.isdigit() and int(key) in tower_dict.keys():
+                tower_type = tower_dict[int(key)]
+                self.selected_tower_ch = tower_type().string
+                
             elif key == "q":
                 break
         self.show_cursor = False
@@ -367,10 +396,13 @@ class Visual_scr:
                 if self.cursor == (r, c*2) and self.show_cursor:
                     if ch != " ":
                         bracket_ch = "}"
+                        color = self.yellow
                     else: 
                         bracket_ch = ")"
                         ch = self.selected_tower_ch
-                    self.sub.addstr(r, c*2, ch + bracket_ch)
+                        color = self.black
+                    self.sub.addch(r, c*2, ch, color)
+                    self.sub.addch(r, c*2+1, bracket_ch, self.blue)
                 else:
                     self.sub.addstr(r,c*2, ch + " ", color)
         self.sub.refresh()
