@@ -1,136 +1,162 @@
-#!/usr/bin/env python2
-import curses
+#!/usr/bin/env python
 import random
-import math
-import collections
-import heapq
-import threading
 import time
+import curses
+import heapq
+from libs import _Basic, _Fast, _Tank, _Mob
+from libs import _Pellet, _Aqua, _3, _4, _5
+from libs import rounds
 
-# Data type for a* pathfinding search.
-class PriorityQueue:
-    def __init__(self):
-        self.elements = []
-    def empty(self):
-        return len(self.elements) == 0
-    def put(self, item, priority):
-        heapq.heappush(self.elements, (priority, item))
-    def get(self):
-        return heapq.heappop(self.elements)[1]
-
-# The main class.  
-class Grid:
+class Game:
     def __init__(self, height, width, screen=None):
         self.height = height
         self.width = width
-        self.towers = dict()
-        start = (10,0)
-        goal = (10, 19)
-        self.start = start
-        self.goal = goal
-        self.enemies = {self.start:list()}
         self.vis = Visual_scr(self, screen)
-        self.path = self.a_star_search(start, goal)
+        self.towers = dict()
+        self.start = (10, 0)
+        self.goal = (10, 19)
+        self.path = self.a_star_search(self.start, self.goal)
+        self.enemies = {self.start:[]}
         self.round_num = 0
-        self.game_over = False
-        self.money = 2000
-        self.vis.draw(self)
+        self.money = 80
+        self.money = 100000000000
+        self.lives_left = 20
+        self.message = ""
+        self.e = 0
         self.main_while()
-
-    # Entire game loop.  First player places towers, then enemies come.
+    
+    # The main loop of the game.
+    # First, allows user to place and sell towers
+    # Then, sends a wave of enemies through the towers
     def main_while(self):
-        rounds = [("superboss", 20), ("superboss", 10), ("basic", 5), ("basic", 10), ("boss", 1), \
-                ("basic", 10), ("boss", 5)]
-        rounds = [("superboss", 5)] * 20
-        while self.round_num < len(rounds):
-            this_round = rounds[self.round_num]
-            enemy_type = this_round[0]
-            amount = this_round[1]
-            self.player_place()
-            self.play_round(enemy_type, amount)
+        self.rounds = rounds
+        for r in self.rounds:
+            self.vis.side_pane()
+            enemy_type = r[0]
+            health = r[1]
+            gold = r[2]
+            amount = r[3]
+            self.placing_phase()
+            self.enemy_phase(enemy_type, health, gold, amount)
+            for p, e in self.enemies.items():
+                if not e and p != self.start:
+                    del self.enemies[p]
+            for t in self.towers.values():
+                t.replenish()
             self.round_num += 1
-        self.game_over = True
-
-    # Placng stage.
-    def player_place(self):
-        user_cmd_gen = self.vis.getch(self)
-        user_cmd = True
+    # Uses a generator in the Visual_scr object to interact with
+    # player, and reacts to the commands.
+    def placing_phase(self):
+        # TODO: don't commit self.path till the end
+        user_cmd_generator = self.vis.user_input()
+        self.placed_this_round = set()
         money_available = self.money
         while True:
-            self.vis.status_line("Money available: {}".format(str(money_available)))
-            user_cmd, arg1, arg2 = next(user_cmd_gen)
-            if user_cmd == False: break
-            if user_cmd == "BUY":
+            status = "${}\t\tRound:{}\tLives:{}".format(self.money, self.round_num, self.lives_left)
+            self.vis.status_line(status)
+            user_cmd_all = next(user_cmd_generator)
+            user_cmd = user_cmd_all[0]
+            cmd_args = user_cmd_all[1:]
+            # User sends next round of enemies
+            if user_cmd  == "SENDEM"and money_available >= 0: break 
+            elif user_cmd == "SENDEM":
+                self.message = "You spent more money than you own.  Remove some buildings!"
+                self.vis.msg_line(self.message)
+            # User places or removes tile
+            if user_cmd == "TOGGLE":
                 old_towers = self.towers.copy()
-                new_tower = arg1()
-                self.add_tower(new_tower, arg2)
-                temp_path = self.a_star_search(self.start, self.goal)
-                if not temp_path: # goal is blocked
-                    self.towers = old_towers
+                tower_type = cmd_args[0]
+                point = cmd_args[1]
+                # Refunding a tower built in this round.
+                if point in self.towers.keys() and \
+                    point in self.placed_this_round:
+                        tower = self.towers[point] 
+                        refund = tower.cost
+                        self.del_tower(point)
+                        self.path = self.a_star_search(self.start, self.goal)
+                        if point in self.placed_this_round:
+                            self.placed_this_round.remove(point)
+                        money_available += refund
+                elif point in self.towers.keys():
+                    pass
                 else:
-                    self.path = temp_path
-                    money_available -= new_tower.cost
-            elif user_cmd == "SELL":
-                try:
-                    tower = self.towers[arg1]
-                    refund = tower.cost
-                    if tower.round_placed != self.round_num:
-                        refund /= 2
-                    self.del_tower(arg1)
-                    self.path = self.a_star_search(self.start, self.goal)
-                    money_available += int(refund)
-                except: pass
-        self.money = money_available
-    def del_tower(self, point):
-        del self.towers[point]
-    def play_round(self, enemy_type, amount):
-        self.num_enemies = amount
-        initial_amount = amount
-        while self.num_enemies > 0 or amount > 0:
-            self.vis.status_line("Round: {}\t\tEnemies: {}/{}".format(\
-                    self.round_num+1, self.num_enemies, initial_amount))
-            send_one = random.randrange(10)
-            if send_one == 1: 
-                send_one = True
-            else: send_one = False
-            if send_one and amount > 0:
-                self.add_enemy(enemy_type)
-                amount -= 1
-            self.tick()
-            self.vis.draw(self)
+                    # Buying a tower.
+                    tower = tower_type()
+                    self.add_tower(tower, point)
+                    self.vis.draw(self)
+                    temp_path = self.a_star_search(self.start, self.goal)
+                    # If not possible
+                    if not temp_path:
+                        self.towers = old_towers.copy()
+                    else:
+                        self.placed_this_round.add(point)
+                        self.path = temp_path
+                        money_available -= tower.cost
+            # Selling a tower built previous round (for half price)
+            if user_cmd == "SELL":
+                point = cmd_args[0]
+                if point not in self.towers: continue
+                tower = self.towers[point]
+                refund = int(tower.cost / 2)
+                self.del_tower(point)
+                self.path = self.a_star_search(self.start, self.goal)
+                money_available += refund
 
-                
-    def add_to_enemy_list(self, point, enemy):
-        if point not in self.enemies:
-            self.enemies[point] = [enemy]
-        else:
-            self.enemies[point].append(enemy)
-    def enemy_tick(self):        
-        already_moved = list()
+            self.money = money_available
+            self.vis.draw(self)
+            self.vis.msg_line(self.message)
+            self.message = ""
+            self.vis.debug_line(str(len(self.path)))
+
+    # Phase to release enemies. Over when all enemies are released and either
+    # escaped or killed.
+    def enemy_phase(self, enemy_type, health, gold, amount):
+        self.num_enemies = amount
+        enemies_to_be_released = amount
+        while self.num_enemies > 0 or enemies_to_be_released > 0:
+            status = "${} Round:{} Lives:{} Enemies:{}/{}".format(self.money, self.round_num, \
+                            self.lives_left, self.num_enemies, amount)
+            self.vis.status_line(status)
+            send_one = random.randrange(10)
+            if send_one == 1 and enemies_to_be_released > 0:
+                self.release_enemy(enemy_type, health, gold)
+                enemies_to_be_released -= 1
+            self.enemy_tick()
+            self.tower_tick()
+            time.sleep(.001)
+            self.vis.draw(self)
+            self.e += 1
+    def enemy_tick(self):
+        # TODO: make it so that there's only one enemy per tile. Maybe.
+
         for point, enemy_list in self.enemies.items():
+            # TODO: kill_enemy function
+            # If enemy reaches goal:
             if point == self.goal:
                 for enemy in enemy_list:
                     self.enemies[point].remove(enemy)
                     self.num_enemies -= 1
+                    self.lives_left -= 1
+                    self.money += enemy.gold
                     del enemy
                 continue
 
-            try: path_position = self.path.index(point)
-            except: 
-                path_position = 0
-                self.vis.status_line(str(point))
+            path_position = self.path.index(point)
             next_point = self.path[path_position+1]
+            # Move all the enemies that can move this tick.
             for enemy in enemy_list:
-                if enemy in already_moved: continue
-                if not enemy.can_move(): continue
                 if enemy.health <= 0:
                     self.enemies[point].remove(enemy)
                     self.num_enemies -= 1
+                    self.money += enemy.gold
                     del enemy
                     continue
+                if not enemy.can_move(): continue
                 self.enemies[point].remove(enemy)
-                self.add_to_enemy_list(next_point, enemy)
-                already_moved.append(enemy)
+                if next_point not in self.enemies:
+                    self.enemies[next_point] = [enemy]
+                else:
+                    self.enemies[next_point].append(enemy)
     def tower_tick(self):
         enemies = {key:value for key, value in self.enemies.items() if value}
         temp_enemies = {}
@@ -148,30 +174,37 @@ class Grid:
                     if point in tower.rrange:
                         tower.target = e
             if tower.target and tower.can_shoot():
-                self.vis.screen.move(25,0)
-                self.vis.screen.clrtoeol()
                 tower.shoot(tower.target)
+    def del_tower(self, point):
+        del self.towers[point]
+    def add_tower(self, tower, point):
+        self.towers[point] = tower
+        tower.rrange = self.find_range(point, tower.radius)
+        tower.round_placed = self.round_num
+    def release_enemy(self, enemy_type, health, gold):
+        enemy = enemy_type()
+        enemy.health = health
+        enemy.gold = gold
+        self.enemies[self.start].append(enemy)
 
 
-    def tick(self):
-        self.enemy_tick()
-        self.tower_tick()
-        time.sleep(.001)
+
     def find_range(self, point, radius):
+        # to make the values compatible with DTD.
+        radius /= 20
         in_range = []
         y, x = point
         for hyp_y in range(y-radius, y+radius+1):
             for hyp_x in range(x-radius, x+radius+1):
                 if not self.in_bounds((hyp_y, hyp_x)):
                     continue
-                if (hyp_x - x)**2 + (hyp_y - y)**2 < radius**2:
+                if (hyp_x - x)**2 + (hyp_y - y)**2 <= radius**2:
                     in_range.append((hyp_y, hyp_x))
-        return in_range 
-                
+        return in_range
     def neighbors(self, point):
         (x, y) = point
-        results = [(x+1,y), (x, y-1), (x-1,y), (x,y+1)]
-        if (x + y) % 2 == 0: results.reverse()
+        results = [(x+1,y), (x,y-1), (x-1,y), (x,y+1)]
+        if (x+y) % 2 == 0: results.reverse()
         results = filter(self.in_bounds, results)
         results = filter(self.passable, results)
         return results
@@ -180,15 +213,6 @@ class Grid:
         return 0 <= x < self.width and 0 <= y < self.height
     def passable(self, point):
         return point not in self.towers.keys()
-    def add_tower(self, tower, point):
-#        tower = tower()
-        self.towers[point] = tower
-        tower.rrange = self.find_range(point, tower.radius)
-        tower.round_placed = self.round_num
-    def add_enemy(self, enemy_type):
-        enemy_dict = {"superboss": _SuperBoss, "basic": _Basic, "boss": _Boss}
-        enemy = enemy_dict[enemy_type]()
-        self.enemies[self.start].append(enemy)
     def heuristic(self, a, b):
         (x1, x2) = a
         (y1, y2) = b
@@ -216,82 +240,22 @@ class Grid:
             path.append(current)
         path.reverse()
         return path
-class _Enemy:
-    def can_move(self):
-        self.i += 1
-        if self.i % self.speed == 0:
-            return True
-        return False
-    def get_shot(self, amount):
-        self.health -= amount
-    pass
-class _Basic(_Enemy):
-    def __init__(self):
-        self.i = 0
-        self.speed = 10
-        self.initial_health = 100
-        self.health = self.initial_health
-        self.string = "a"
-class _Boss(_Enemy):
-    def __init__(self):
-        self.i = 0
-        self.speed = 5
-        self.initial_health = 200
-        self.health = self.initial_health
-        self.string = "B"
-class _SuperBoss(_Enemy):
-    def __init__(self):
-        self.i = 0
-        self.speed = 2
-        self.initial_health = 1000
-        self.health = self.initial_health
-        self.string = "O"
-class _Tower:
-    def can_shoot(self):
-        if self.i == self.speed:
-            return True
-        return False
-    def shoot(self, enemy):
-        enemy.get_shot(self.strength)
-        self.i = 0
-    def tick(self):
-        if self.i < self.speed:
-            self.i += 1
-class _Pellet(_Tower):
-    def __init__(self):
-        self.target = None
-        self.radius = 3
-        self.speed = 100
-        self.i = self.speed
-        self.strength = 5
-        self.string = "%"
-        self.cost = 100
-        pass
-class _Aqua(_Tower):
-    def __init__(self):
-        self.target = None
-        self.radius = 4
-        self.speed = 200
-        self.i = self.speed
-        self.strength = 10
-        self.string = "@"
-        self.cost = 200
-        pass
+   
 
+
+
+# This entire class is only for showing the game and getting user input.
+# There is no actual game logic here.
 class Visual_scr:
     def __init__(self, grid, screen):
         self.grid = grid
         self.height = grid.height
         self.width = grid.width
         self.screen = screen
-        self.box = screen.subwin(self.height+2, self.width*2+2, 0, 0)
-        self.box.addch((self.height+2)//2, 0, " ")
-        self.sub = self.box.subwin(self.height+1, self.width*2+0, 1,1)
-        self.box.box()
-        self.box.move(self.height//2+1, self.width*2)
-        self.box.insstr("=")
-        self.box.insstr(self.height//2+1, 0, "=")
-        curses.curs_set(0)
+        self.set_up_colors()
+        self.set_up_screen()
+        self.tower_type = _Pellet
+    def set_up_colors(self):
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_BLACK)
         curses.init_pair(2, curses.COLOR_BLUE, curses.COLOR_BLACK)
         curses.init_pair(3, curses.COLOR_RED, curses.COLOR_BLACK)
@@ -311,110 +275,157 @@ class Visual_scr:
         self.cyan = curses.color_pair(6)|curses.A_BOLD
         self.orange = curses.color_pair(7)
         self.yellow = curses.color_pair(7)| curses.A_BOLD
-        self.enemy_colors = [self.yellow, self.orange, self.pink, self.red]
-        self.tower_colors = [self.green, self.teal, self.blue, self.magenta]
-        self.revised_tower_colors = {_Pellet: self.green, _Aqua: self.blue}
-        self.tower_colors.reverse()
-        self.enemy_colors.reverse()
-        self.selected_tower_ch = "%"
+    def set_up_screen(self):
+        # self.box exists just to draw the border.  
+        # width*2 to have a space between each tile
+        self.box = self.screen.subwin(self.height+2, self.width*2+2, 0, 0)
+        # The actual main game screen
+        self.sub = self.box.subwin(self.height+1, self.width*2+0, 1, 1)
+        self.box.box()
+        # These are where the creeps come out.
+        self.box.move(self.height//2+1, 0)
+        self.box.insstr(" ")
+        self.box.move(self.height//2+1, self.width*2)
+        self.box.insstr(" ")
+        # We'll have our own two-char cursor.
+        # Physical, visual cursor, not game-logical.
+        curses.curs_set(0)
         self.cursor = (self.height//2, self.width)
         self.show_cursor = False
-    def status_line(self, line):
+        self.side = self.screen.subwin(30, 30, 0, self.width*2+4)
+        self.side.addstr("hello world!")
+        self.screen.refresh()
+
+    def side_pane(self):
+        self.side.clear()
+        next_five = self.grid.rounds[self.grid.round_num:self.grid.round_num+5]
+        next_five = [a[0]().string for a in next_five]
+        next_five = " ".join(next_five)
+        self.side.addstr(1, 0, next_five)
+        tower = self.tower_type()
+        name = tower.string
+        speed = str(tower.speed)
+        strength = str(tower.strength)
+        radius = str(tower.radius)
+        self.side.addstr(2, 0, name)
+        self.side.addstr(3, 0, tower.name)
+        self.side.addstr(4, 0, "Speed: \t" + speed)
+        self.side.addstr(5, 0, "Power: \t" + strength)
+        self.side.addstr(6, 0, "Radius:\t"+ radius)
+        self.side.addstr(7, 0, tower.desc)
+        self.side.refresh()
+    
+    # For displaying game info (round, money, etc)
+    def status_line(self, line=""):
         self.screen.move(self.height+2, 0)
         self.screen.clrtoeol()
         self.screen.addstr(line)
+    def msg_line(self, msg):
+        self.screen.move(self.height+3, 0)
+        self.screen.clrtoeol()
+        self.screen.addstr(msg)
+    def debug_line(self, line=""):
+        self.screen.move(self.height+4, 0)
+        self.screen.clrtoeol()
+        self.screen.addstr(line)
+
     def cursor_move(self, move_tuple):
-        bracket_ch = ")"
         y = self.cursor[0]
         x = self.cursor[1]
-        newy = y + move_tuple[0]
-        newx = x + move_tuple[1]
-        if not (newy in range(self.height) and newx in range(self.width*2)):
+        y += move_tuple[0]
+        x += move_tuple[1]
+        if not (y in range(self.height) and x in range(self.width*2)):
             return
-
-        self.cursor = (newy, newx)
-
-
-
-    def getch(self, grid):
-        self.show_cursor = True
-        dir_dict = {"w": (-1, 0), "a": (0,-2), "s": (1,0), "d": (0,2)}
-        tower_dict = {1: _Pellet, 2: _Aqua}
-        addtrue_delfalse = True
-        tower_type = _Pellet
+        self.cursor = (y, x)
+    
+    def user_input(self):
+        dir_dict = {"w": (-1, 0), "a": (0, -2), "s": (1, 0), "d": (0, 2)}
+        tower_dict = [_Pellet, _Aqua, _3, _4, _5]
         while True:
+            self.show_cursor = True
             key = self.screen.getkey()
             if key in dir_dict.keys():
                 self.cursor_move(dir_dict[key])
-                self.draw(grid)
-            elif key == "\n":
-                if addtrue_delfalse:
-                    yield "BUY", tower_type, (self.cursor[0], self.cursor[1]//2)
-                else:
-                    yield "SELL", (self.cursor[0], self.cursor[1]//2), None
-            elif key == "/":
-                addtrue_delfalse = not addtrue_delfalse
-            elif key.isdigit() and int(key) in tower_dict.keys():
-                tower_type = tower_dict[int(key)]
-                self.selected_tower_ch = tower_type().string
-                
-            elif key == "q":
-                break
-        self.show_cursor = False
-        yield False, False, False
+                self.side_pane()
+                self.draw(self.grid)
+            elif key == " ":
+                yield "TOGGLE", self.tower_type, (self.cursor[0], self.cursor[1]//2)
+            elif key == "l":
+                yield "SELL", (self.cursor[0], self.cursor[1]//2), False
+            elif key == "q": 
+                self.show_cursor = False
+                yield "SENDEM", False, False
+            elif key.isdigit() and int(key) in range(1, len(tower_dict)+1):
+                self.tower_type = tower_dict[int(key)-1]
 
 
     def draw_tile(self, point):
         ch = " "
         color = self.black
+        # If this tile contains a tower:
         if point in self.grid.towers.keys():
             tower = self.grid.towers[point]
             ch = tower.string
-            interval = tower.speed / 3
-            which_interval = int(tower.i/interval)
-            color = self.tower_colors[which_interval]
-            if tower.i != tower.speed:
+            if self.show_cursor:
                 color = self.black
             else:
-                for t_type in self.revised_tower_colors:
-                    if isinstance(tower, t_type):
-                        color = self.revised_tower_colors[t_type]
-            
+                if tower.i < tower.speed:
+                    color = self.black
+                else:
+                    color = self.green
+
+        # If this tile contains an enemy:
         if point in self.grid.enemies.keys() and len(self.grid.enemies[point]) > 0:
             enemy = random.choice(self.grid.enemies[point])
             ch = enemy.string
-            interval = abs(enemy.initial_health // 3)
-            which_interval = int(enemy.health/interval)
-            color = self.enemy_colors[which_interval]
-            
+            color = self.red
         return ch, color
+
     def draw(self, grid):
+        self.grid = grid
         for r in range(self.height):
             for c in range(self.width):
-                point = (r,c)
+                point = (r, c)
                 ch, color = self.draw_tile(point)
+                if (r, c) in self.grid.placed_this_round and self.show_cursor:
+                    color = self.teal
+                # x) means tower x is to be placed
+                # x} means tower x was already placed there
+                # TODO: x] means tower x was placed there this turn
+                #       and can therefore be sold at full refund.
                 if self.cursor == (r, c*2) and self.show_cursor:
                     if ch != " ":
                         bracket_ch = "}"
+                        bracket_color = self.yellow
+                    else:
+                        ch = self.tower_type().string
                         color = self.yellow
-                    else: 
                         bracket_ch = ")"
-                        ch = self.selected_tower_ch
-                        color = self.black
+                        bracket_color = self.black
                     self.sub.addch(r, c*2, ch, color)
-                    self.sub.addch(r, c*2+1, bracket_ch, self.blue)
+                    self.sub.addch(r, c*2+1, bracket_ch, bracket_color)
                 else:
-                    self.sub.addstr(r,c*2, ch + " ", color)
+                    self.sub.addstr(r, c*2, ch + " ", color)
+        
         self.sub.refresh()
         self.box.refresh()
         self.screen.refresh()
-        return
+
+
+# Data type for a* pathfinding search.
+class PriorityQueue:
+    def __init__(self):
+        self.elements = []
+    def empty(self):
+        return len(self.elements) == 0
+    def put(self, item, priority):
+        heapq.heappush(self.elements, (priority, item))
+    def get(self):
+        return heapq.heappop(self.elements)[1]
 
 
 
 def main_scr(screen):
     rows, cols = 20, 20
-    game = Grid(rows, cols, screen)
-
+    game = Game(rows, cols, screen)
 curses.wrapper(main_scr)
-
