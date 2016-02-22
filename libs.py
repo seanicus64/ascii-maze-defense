@@ -37,7 +37,7 @@ class _Mob(_Enemy):
         self.speed = 8
         self.initial_health = 100
         self.health = self.initial_health
-        self.string = "p"
+        self.string = "o"
         self.gold = 1
 class _Boss(_Enemy):
     def __init__(self):
@@ -89,7 +89,7 @@ class _Aqua(_Tower):
         self.radius = 120
         self.speed = 70
         self.i = self.speed
-        self.strength = 7
+        self.strength = 5
         self.string = "@"
         self.cost = 10
         pass
@@ -99,7 +99,7 @@ class _3(_Tower):
         self.desc = "strong, slow shooter, long range"
         self.target = None
         self.radius = 180
-        self.speed = 200
+        self.speed = 300
         self.i = self.speed
         self.strength = 30
         self.string = "#"
