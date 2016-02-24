@@ -3,7 +3,7 @@ import random
 import time
 import curses
 import heapq
-from libs import _Basic, _Fast, _Tank, _Mob
+from libs import _Basic, _Fast, _Tank, _Mob, _Flying
 from libs import _Pellet, _Aqua, _3, _4, _5
 from libs import rounds
 
@@ -18,8 +18,8 @@ class Game:
         self.path = self.a_star_search(self.start, self.goal)
         self.enemies = {self.start:[]}
         self.round_num = 0
-        self.money = 80
-        self.money = 100000000000
+        self.money = 100
+        #self.money = 100000000000
         self.lives_left = 20
         self.message = ""
         self.e = 0
@@ -106,11 +106,13 @@ class Game:
             self.vis.draw(self)
             self.vis.msg_line(self.message)
             self.message = ""
-            self.vis.debug_line(str(len(self.path)))
+#            self.vis.debug_line(str(len(self.path)))
 
     # Phase to release enemies. Over when all enemies are released and either
     # escaped or killed.
     def enemy_phase(self, enemy_type, health, gold, amount):
+        self.enemies = {(i, 0):[] for i in range(self.height)}
+        self.amount_this_round = amount
         self.num_enemies = amount
         enemies_to_be_released = amount
         while self.num_enemies > 0 or enemies_to_be_released > 0:
@@ -128,7 +130,8 @@ class Game:
             self.e += 1
     def enemy_tick(self):
         # TODO: make it so that there's only one enemy per tile. Maybe.
-
+        health = 0
+        enemy_set = set()
         for point, enemy_list in self.enemies.items():
             # TODO: kill_enemy function
             # If enemy reaches goal:
@@ -140,11 +143,23 @@ class Game:
                     self.money += enemy.gold
                     del enemy
                 continue
-
-            path_position = self.path.index(point)
-            next_point = self.path[path_position+1]
+            # Can't find position in the path because flying enemies don't follow
+            # the path.  Will define for flyers later.
+            try:
+                path_position = self.path.index(point)
+                next_point = self.path[path_position+1]
+            except: pass
+#                next_point = (path[0], path[1]+1)
             # Move all the enemies that can move this tick.
             for enemy in enemy_list:
+                enemy_set.add(enemy)
+                if isinstance(enemy, _Flying):
+                    next_point = (point[0], point[1]+1)
+                if isinstance(enemy, _Flying) and point[1] == self.width-1:
+                    self.enemies[point].remove(enemy)
+                    self.num_enemies -= 1
+                    del enemy
+                    continue
                 if enemy.health <= 0:
                     self.enemies[point].remove(enemy)
                     self.num_enemies -= 1
@@ -157,6 +172,15 @@ class Game:
                     self.enemies[next_point] = [enemy]
                 else:
                     self.enemies[next_point].append(enemy)
+        for enemy in list(enemy_set):
+           # + [1] * (self.amount_this_round -len(enemy_set)):
+            health += (enemy.health *1.) / enemy.initial_health
+        health += self.amount_this_round - len(enemy_set) 
+        #average = str(float(health*1. / self.amount_this_round * 100.)) + "%"
+        #average = str(health)
+        average = str(health/self.amount_this_round)
+
+#        self.vis.debug_line(average)
     def tower_tick(self):
         enemies = {key:value for key, value in self.enemies.items() if value}
         temp_enemies = {}
@@ -165,6 +189,7 @@ class Game:
                 temp_enemies[e] = p
         enemies = temp_enemies
         for point, tower in self.towers.items():
+            possible_targets = list()
             tower.tick()
             if tower.target:
                 if tower.target not in tower.rrange:
@@ -173,7 +198,15 @@ class Game:
                 for e, point in enemies.items():
                     if point in tower.rrange:
                         tower.target = e
-            if tower.target and tower.can_shoot():
+                        if not isinstance(tower.target, _Flying):
+                            possible_targets.append(e)
+            if hasattr(tower, "multitarget") and tower.can_shoot():
+                for e in possible_targets:
+                    tower.shoot(e)
+                    e.get_stunned()
+#                    if hasattr(e, "stunned"):
+#                        self.vis.debug_line(str(e.stunned))
+            elif tower.target and tower.can_shoot():
                 tower.shoot(tower.target)
     def del_tower(self, point):
         del self.towers[point]
@@ -185,7 +218,10 @@ class Game:
         enemy = enemy_type()
         enemy.health = health
         enemy.gold = gold
-        self.enemies[self.start].append(enemy)
+        start = self.start
+        if isinstance(enemy, _Flying):
+            start = (random.randrange(3, self.height-3), 0)
+        self.enemies[start].append(enemy)
 
 
 
@@ -307,12 +343,19 @@ class Visual_scr:
         speed = str(tower.speed)
         strength = str(tower.strength)
         radius = str(tower.radius)
-        self.side.addstr(2, 0, name)
-        self.side.addstr(3, 0, tower.name)
-        self.side.addstr(4, 0, "Speed: \t" + speed)
-        self.side.addstr(5, 0, "Power: \t" + strength)
-        self.side.addstr(6, 0, "Radius:\t"+ radius)
-        self.side.addstr(7, 0, tower.desc)
+        tower_string = ""
+        for i in "!@#$%":
+            if i == name:
+                tower_string += "[{}]".format(name)
+            else:
+                tower_string += " {}".format(i)
+        self.side.addstr(2, 0, tower_string)
+        self.side.addstr(3, 0, name)
+        self.side.addstr(4, 0, tower.name)
+        self.side.addstr(5, 0, "Speed: \t" + speed)
+        self.side.addstr(6, 0, "Power: \t" + strength)
+        self.side.addstr(7, 0, "Radius:\t"+ radius)
+        self.side.addstr(8, 0, tower.desc)
         self.side.refresh()
     
     # For displaying game info (round, money, etc)
@@ -357,6 +400,8 @@ class Visual_scr:
                 yield "SENDEM", False, False
             elif key.isdigit() and int(key) in range(1, len(tower_dict)+1):
                 self.tower_type = tower_dict[int(key)-1]
+                self.side_pane()
+                self.draw(self.grid)
 
 
     def draw_tile(self, point):
@@ -369,7 +414,9 @@ class Visual_scr:
             if self.show_cursor:
                 color = self.black
             else:
-                if tower.i < tower.speed:
+                if tower.speed/2 < tower.i < tower.speed:
+                    color = self.blue
+                elif tower.i < tower.speed:
                     color = self.black
                 else:
                     color = self.green
@@ -379,6 +426,10 @@ class Visual_scr:
             enemy = random.choice(self.grid.enemies[point])
             ch = enemy.string
             color = self.red
+            try: 
+                if enemy.stunned > 0:
+                    color = color | curses.A_REVERSE
+            except: pass
         return ch, color
 
     def draw(self, grid):

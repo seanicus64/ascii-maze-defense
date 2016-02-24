@@ -1,11 +1,30 @@
+import random
 class _Enemy:
     def can_move(self):
         self.i += 1
+        is_stunned = self.check_stunned()
+        if is_stunned: return False
         if self.i % self.speed == 0:
             return True
         return False
     def get_shot(self, amount):
         self.health -= amount
+    def check_stunned(self):
+        if not hasattr(self, "stunned"): return False
+        if self.i - self.stunned >= self.speed * 5:
+            self.stunned = -self.speed * 200
+            return False
+        else: return True
+    def get_stunned(self):
+        true = random.randrange(100)
+        if true > 30: true = False
+        if not true: return
+        self.string = "Q"
+        try:
+            if self.stunned <= 0:
+                self.stunned = self.i
+        except:
+            self.stunned = self.i
     pass
 class _Basic(_Enemy):
     def __init__(self):
@@ -18,7 +37,7 @@ class _Basic(_Enemy):
 class _Fast(_Enemy):
     def __init__(self):
         self.i = 0
-        self.speed = 7
+        self.speed = 5
         self.initial_health = 15
         self.health = self.initial_health
         self.string = "f"
@@ -26,7 +45,7 @@ class _Fast(_Enemy):
 class _Tank(_Enemy):
     def __init__(self):
         self.i = 0
-        self.speed = 15
+        self.speed = 20
         self.initial_health = 300
         self.health = self.initial_health
         self.string = "T"
@@ -39,6 +58,14 @@ class _Mob(_Enemy):
         self.health = self.initial_health
         self.string = "o"
         self.gold = 1
+class _Flying(_Enemy):
+    def __init__(self):
+        self.i = 0
+        self.speed = 10
+        self.initial_health = 20
+        self.health = self.initial_health
+        self.string = ">"
+        self.gold = 2
 class _Boss(_Enemy):
     def __init__(self):
         self.i = 0
@@ -69,8 +96,16 @@ class _Tower:
     def tick(self):
         if self.i < self.speed:
             self.i += 1
+    def upgrade(self):
+        upgrades = self.upgrades[self.u]
+        self.radius = upgrades[1]
+        self.speed = upgrades[2]
+        self.strength = upgrades[3]
+        self.i = self.speed
 class _Pellet(_Tower):
     def __init__(self):
+        self.upgrades = [
+            (300, 60, 100, 20)]
         self.name = "Pellet Tower"
         self.desc = "weak, medium shooter, moderate range"
         self.target = None
@@ -101,18 +136,19 @@ class _3(_Tower):
         self.radius = 180
         self.speed = 300
         self.i = self.speed
-        self.strength = 30
+        self.strength = 20
         self.string = "#"
         self.cost = 15
 class _4(_Tower):
     def __init__(self):
         self.name = "Bash Tower"
         self.desc = "very strong, slow shooter, very short range"
+        self.multitarget = True
         self.target = None
         self.radius = 40
-        self.speed = 250
+        self.speed = 300
         self.i = self.speed
-        self.strength = 50
+        self.strength = 40
         self.string = "$"
         self.cost = 30
 class _5(_Tower):
@@ -121,25 +157,30 @@ class _5(_Tower):
         self.desc = "Medium, medium, medium"
         self.target = None
         self.radius = 60
-        self.speed = 250
+        self.speed = 100
         self.i = self.speed
         self.strength = 20
         self.string = "%"
         self.cost = 50
 rounds = [\
-    (_Basic, 12, 2, 10),
-    (_Basic, 12, 2, 10),
-    (_Fast, 20, 3, 10),
-    (_Basic, 40, 4, 8),
-    (_Tank, 200, 20, 5),
-    (_Basic, 40, 5, 10),
-    (_Mob, 32, 2, 30),
-    (_Fast, 60, 10, 10),
-    (_Tank, 400, 25, 5),
-    (_Basic, 80, 10, 10),
-    (_Mob, 40, 3, 40),
-    (_Tank, 480, 30, 3),
-    (_Fast, 120, 15, 10),
-    (_Mob, 60, 5, 50)]
+    (_Basic, 12, 3, 10),
+    (_Basic, 12, 3, 10),
+    (_Fast, 20, 5, 10),
+    (_Basic, 40, 3, 8),
+    (_Tank, 100, 25, 5),
+    (_Flying, 30, 5, 8),
+    (_Basic, 40, 2, 10),
+    (_Mob, 30, 2, 30),
+    (_Fast, 60, 5, 10),
+    (_Tank, 200, 25, 5),
+    (_Basic, 80, 2, 10),
+    (_Flying, 80, 5, 10),
+    (_Mob, 40, 2, 40),
+    (_Tank, 300, 30, 4),
+    (_Fast, 120, 5, 10),
+    (_Flying, 120, 5, 10),
+    (_Mob, 60, 2, 50)]
+#rounds = [(_Basic, 5000, 2, 1)] * 100
+#rounds = [(_Flying, 100, 2, 8),]* 100
 
 
