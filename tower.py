@@ -1,24 +1,75 @@
 #!/usr/bin/env python
 import random
+import math
 import time
 import curses
 import heapq
 from libs import _Basic, _Fast, _Tank, _Mob, _Flying
 from libs import _Pellet, _Aqua, _3, _4, _5
 from libs import rounds
+import pickle
+import getopt
+import sys
 
 class Game:
     def __init__(self, height, width, screen=None):
         self.height = height
         self.width = width
         self.vis = Visual_scr(self, screen)
-        self.towers = dict()
         self.start = (10, 0)
         self.goal = (10, 19)
+        self.numbers = list()
+        self.towers = dict()
+        self.round_num = 0
+        try:
+            args = sys.argv[1:]
+            self.vis.debug_line(str(args))
+            if "-p" in args:
+                with open("pickled") as f:
+                    self.towers = pickle.load(f)
+                self.round_num = 30
+        except: 
+            pass
+
+#        try: 
+#            opts, args = getopt.getopt(sys.argv[1:], "p")
+#            for o, a in opts:
+#                if o == "p":
+#                    with open("pickled") as f:
+#                        self.towers = pickle.load(f)
+#
+#
+#        except:# getopt.GetoptError: 
+#
+#            print(self.towers)
+#            self.towers = {(5,5):_Basic()}
+#            raw_input()            
+#            pass
+#        while len(self.numbers) < 4:
+#            y = random.randrange(self.height)
+#            x = random.randrange(self.width)
+#            coord = (y, x)
+#            for x in self.numbers.union([self.goal, self.start]):
+#                if not coord in self.neighbors(x):# and \
+#                    self.numbers.add(coord)
+#
+        while len(self.numbers) < 3:
+            x = random.randrange(3, self.width-3)
+            y = random.randrange(3, self.height-3)
+            for p in self.numbers + [self.start, self.goal]:
+                if (y, x) == p: continue
+                dist = self.calc_distance(p, (y, x))
+                point  = (y, x)
+                valid = True
+                if dist < 100:
+                    valid = False
+                    continue
+                if not valid: continue
+            self.numbers.append(point)
+            self.vis.debug_line(str(self.numbers))
         self.path = self.a_star_search(self.start, self.goal)
         self.enemies = {self.start:[]}
-        self.round_num = 0
-        self.money = 100
+        self.money = 250
         #self.money = 100000000000
         self.lives_left = 20
         self.message = ""
@@ -30,7 +81,7 @@ class Game:
     # Then, sends a wave of enemies through the towers
     def main_while(self):
         self.rounds = rounds
-        for r in self.rounds:
+        for r in self.rounds[self.round_num:]:
             self.vis.side_pane()
             enemy_type = r[0]
             health = r[1]
@@ -43,6 +94,7 @@ class Game:
                     del self.enemies[p]
             for t in self.towers.values():
                 t.replenish()
+            self.vis.draw(self)
             self.round_num += 1
     # Uses a generator in the Visual_scr object to interact with
     # player, and reacts to the commands.
@@ -101,6 +153,9 @@ class Game:
                 self.del_tower(point)
                 self.path = self.a_star_search(self.start, self.goal)
                 money_available += refund
+            if user_cmd == "SAVE":
+                with open("pickled", "w") as f:
+                    obj = pickle.dump(self.towers, f)
 
             self.money = money_available
             self.vis.draw(self)
@@ -140,9 +195,18 @@ class Game:
                     self.enemies[point].remove(enemy)
                     self.num_enemies -= 1
                     self.lives_left -= 1
-                    self.money += enemy.gold
                     del enemy
                 continue
+            if not enemy_list: continue
+            if point in self.numbers:
+                for enemy in enemy_list:
+                    if enemy.waypoint is False: continue
+                    if enemy.waypoint == len(self.numbers): continue
+                    if point == self.numbers[enemy.waypoint]:
+                        enemy.waypoint += 1
+                        if enemy.waypoint == len(self.numbers):
+                            enemy.gold *= 2
+                        
             # Can't find position in the path because flying enemies don't follow
             # the path.  Will define for flyers later.
             try:
@@ -172,6 +236,7 @@ class Game:
                     self.enemies[next_point] = [enemy]
                 else:
                     self.enemies[next_point].append(enemy)
+                enemy.point = next_point
         for enemy in list(enemy_set):
            # + [1] * (self.amount_this_round -len(enemy_set)):
             health += (enemy.health *1.) / enemy.initial_health
@@ -181,6 +246,10 @@ class Game:
         average = str(health/self.amount_this_round)
 
 #        self.vis.debug_line(average)
+    def calc_distance(self, a, b):
+        dist = math.sqrt((a[0]-b[0])**2+(a[1]-b[1])**2)
+        return dist * 20
+
     def tower_tick(self):
         enemies = {key:value for key, value in self.enemies.items() if value}
         temp_enemies = {}
@@ -189,15 +258,21 @@ class Game:
                 temp_enemies[e] = p
         enemies = temp_enemies
         for point, tower in self.towers.items():
+
             possible_targets = list()
-            tower.tick()
             if tower.target:
-                if tower.target not in tower.rrange:
+                distance = self.calc_distance(point, tower.target.point)
+                if distance > tower.radius or tower.target.health <= 0:
+#                if tower.target not in tower.rrange:
                     tower.target = None
             if not tower.target:
-                for e, point in enemies.items():
-                    if point in tower.rrange:
+                for e, epoint in enemies.items():
+                    distance = self.calc_distance(point, epoint)
+                    if distance <= tower.radius:
                         tower.target = e
+                    
+#                    if epoint in tower.rrange:
+#                        tower.target = e
                         if not isinstance(tower.target, _Flying):
                             possible_targets.append(e)
             if hasattr(tower, "multitarget") and tower.can_shoot():
@@ -206,22 +281,26 @@ class Game:
                     e.get_stunned()
 #                    if hasattr(e, "stunned"):
 #                        self.vis.debug_line(str(e.stunned))
-            elif tower.target and tower.can_shoot():
+            elif tower.target and tower.can_shoot() and tower.done_aiming():
                 tower.shoot(tower.target)
+            tower.tick()
     def del_tower(self, point):
         del self.towers[point]
     def add_tower(self, tower, point):
         self.towers[point] = tower
         tower.rrange = self.find_range(point, tower.radius)
         tower.round_placed = self.round_num
+        tower.aiming = 0
     def release_enemy(self, enemy_type, health, gold):
         enemy = enemy_type()
         enemy.health = health
         enemy.gold = gold
+        enemy.waypoint = 0
         start = self.start
         if isinstance(enemy, _Flying):
             start = (random.randrange(3, self.height-3), 0)
         self.enemies[start].append(enemy)
+        enemy.point = start
 
 
 
@@ -328,7 +407,7 @@ class Visual_scr:
         curses.curs_set(0)
         self.cursor = (self.height//2, self.width)
         self.show_cursor = False
-        self.side = self.screen.subwin(30, 30, 0, self.width*2+4)
+        self.side = self.screen.subwin(20, 30, 0, self.width*2+4)
         self.side.addstr("hello world!")
         self.screen.refresh()
 
@@ -398,6 +477,8 @@ class Visual_scr:
             elif key == "q": 
                 self.show_cursor = False
                 yield "SENDEM", False, False
+            elif key == "K":
+                yield "SAVE", False, False
             elif key.isdigit() and int(key) in range(1, len(tower_dict)+1):
                 self.tower_type = tower_dict[int(key)-1]
                 self.side_pane()
@@ -406,7 +487,10 @@ class Visual_scr:
 
     def draw_tile(self, point):
         ch = " "
+    #    ch = "."
         color = self.black
+        if point in self.grid.numbers:
+            ch = str(list(self.grid.numbers).index(point))
         # If this tile contains a tower:
         if point in self.grid.towers.keys():
             tower = self.grid.towers[point]
@@ -416,16 +500,27 @@ class Visual_scr:
             else:
                 if tower.speed/2 < tower.i < tower.speed:
                     color = self.blue
+                    color = self.gray
                 elif tower.i < tower.speed:
                     color = self.black
                 else:
                     color = self.green
+                    colors = {"#": self.green, "@": self.blue, "=": self.teal, "$": self.magenta, "%": self.cyan, ".": self.red}
+                    color = colors[tower.string]
+
+                if tower.speed == tower.i and tower.aiming > 0:
+                    color = self.red
+
 
         # If this tile contains an enemy:
         if point in self.grid.enemies.keys() and len(self.grid.enemies[point]) > 0:
             enemy = random.choice(self.grid.enemies[point])
             ch = enemy.string
-            color = self.red
+            color = self.yellow
+            string = str(int(enemy.health*100./enemy.initial_health))
+#            ch = string[0]
+            if enemy.health * 1. <= enemy.initial_health *.7:
+                color = self.orange
             try: 
                 if enemy.stunned > 0:
                     color = color | curses.A_REVERSE

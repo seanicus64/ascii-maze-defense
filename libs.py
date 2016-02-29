@@ -37,15 +37,15 @@ class _Basic(_Enemy):
 class _Fast(_Enemy):
     def __init__(self):
         self.i = 0
-        self.speed = 5
-        self.initial_health = 15
+        self.speed =  5#2 # 5
+        self.initial_health = 16
         self.health = self.initial_health
         self.string = "f"
         self.gold = 5
 class _Tank(_Enemy):
     def __init__(self):
         self.i = 0
-        self.speed = 20
+        self.speed = 10
         self.initial_health = 300
         self.health = self.initial_health
         self.string = "T"
@@ -61,7 +61,7 @@ class _Mob(_Enemy):
 class _Flying(_Enemy):
     def __init__(self):
         self.i = 0
-        self.speed = 10
+        self.speed = 20
         self.initial_health = 20
         self.health = self.initial_health
         self.string = ">"
@@ -84,18 +84,29 @@ class _SuperBoss(_Enemy):
         self.gold = 20
 class _Tower:
     def replenish(self):
+        self.target = None
         self.i = self.speed
+        self.aiming = 0
         
     def can_shoot(self):
         if self.i == self.speed:
             return True
         return False
+    def done_aiming(self):
+        if self.aiming >= 10:
+            return True
+        return False
     def shoot(self, enemy):
         enemy.get_shot(self.strength)
         self.i = 0
+        self.aiming = 0
     def tick(self):
         if self.i < self.speed:
             self.i += 1
+        if self.target:
+            self.aiming += 1
+        if not self.target:
+            self.aiming = 0
     def upgrade(self):
         upgrades = self.upgrades[self.u]
         self.radius = upgrades[1]
@@ -113,20 +124,20 @@ class _Pellet(_Tower):
         self.speed = 100
         self.i = self.speed
         self.strength = 10
-        self.string = "!"
-        self.cost = 5
+        self.string = "#"
+        self.cost = 15
         pass
 class _Aqua(_Tower):
     def __init__(self):
         self.name = "Aqua Tower"
         self.desc = "weak, fast shooter, moderate range"
         self.target = None
-        self.radius = 120
-        self.speed = 70
+        self.radius = 60
+        self.speed = 50
         self.i = self.speed
-        self.strength = 5
+        self.strength = 70
         self.string = "@"
-        self.cost = 10
+        self.cost = 30
         pass
 class _3(_Tower):
     def __init__(self):
@@ -134,11 +145,11 @@ class _3(_Tower):
         self.desc = "strong, slow shooter, long range"
         self.target = None
         self.radius = 180
-        self.speed = 300
+        self.speed = 200
         self.i = self.speed
         self.strength = 20
-        self.string = "#"
-        self.cost = 15
+        self.string = "="
+        self.cost = 100
 class _4(_Tower):
     def __init__(self):
         self.name = "Bash Tower"
@@ -150,7 +161,7 @@ class _4(_Tower):
         self.i = self.speed
         self.strength = 40
         self.string = "$"
-        self.cost = 30
+        self.cost = 200
 class _5(_Tower):
     def __init__(self):
         self.name = "Middle Tower"
@@ -161,13 +172,37 @@ class _5(_Tower):
         self.i = self.speed
         self.strength = 20
         self.string = "%"
-        self.cost = 50
-rounds = [\
+        self.cost = 200
+# Wave involves one round of each type. shuffled.  (like tetraminos in tetris)
+# according to what round it is, the health of the enemy will go up.
+_Basic_initials = (_Basic, 15, 5, 10)
+_Fast_initials = (_Fast, 20, 6, 10)
+_Mob_initials = (_Mob, 10, 2, 40)
+_Flying_initials = (_Flying, 20, 5, 10)
+_Tank_initials = (_Tank, 200, 25, 1)
+rounds = []
+all_types = [_Basic_initials, _Fast_initials, \
+        _Mob_initials,  _Tank_initials]
+_alt_Basic_initials = (_Basic, 15, 5, 1)
+#all_types = [_alt_Basic_initials]
+
+for i in range(100):
+    wave = []
+    for r in all_types:
+            wave.append((r[0], int(r[1]*1.5**i), r[2]*1.15**i, r[3]))
+    if i == 10:
+        all_types.append(_Flying_initials)
+    rounds.extend(wave)
+#return rounds
+#rounds = [_Tank_initials] * 100
+
+
+roundsx = [\
     (_Basic, 12, 3, 10),
     (_Basic, 12, 3, 10),
     (_Fast, 20, 5, 10),
     (_Basic, 40, 3, 8),
-    (_Tank, 100, 25, 5),
+    (_Tank, 100, 51, 5),
     (_Flying, 30, 5, 8),
     (_Basic, 40, 2, 10),
     (_Mob, 30, 2, 30),
@@ -182,5 +217,11 @@ rounds = [\
     (_Mob, 60, 2, 50)]
 #rounds = [(_Basic, 5000, 2, 1)] * 100
 #rounds = [(_Flying, 100, 2, 8),]* 100
+
+# _Basic: 8 rounds
+# _Aqua: 7
+# = = 10
+# $ = 11, 11, 11, 10
+# % = 10
 
 
